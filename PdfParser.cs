@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using SysColor = System.Drawing.Color;
 using iText.Kernel.Colors;
 using iText.Kernel.Pdf;
+using iText.Kernel.Font;
 using iText.Kernel.Pdf.Annot;
 using iText.Kernel.Pdf.Annot.DA;
 using iText.Kernel.Pdf.Canvas.Parser;
@@ -226,6 +227,42 @@ namespace PdfParser
                 return false;
             }
         }
+        public static bool updateDrawingWithRevisionAndTitleBlock(string sourcePath, string tempPath, string revision)
+        {
+            PdfDocument pdfDoc = null;
+            try
+            {
+                //get pdf for read and write
+                pdfDoc = getPdfForReadAndWrite(sourcePath, tempPath);
+
+                //get page
+                PdfPage page = pdfDoc.GetFirstPage();
+
+                //get annotation on page
+                IList<PdfAnnotation> annotations = page.GetAnnotations();
+
+                //update revision boxes
+                string revRegexPattern = RegexPattern.revision;
+                _updateTextboxContentWithRegex(ref annotations, revision, revRegexPattern);
+
+                //addRevisionBlock
+                addRevisionTitleblockNEW(page, revision);
+
+                //close document
+                pdfDoc.Close();
+
+                //confirm complete
+                return true;
+            }
+            catch
+            {
+                //clean up
+                if (pdfDoc != null) { pdfDoc.Close(); }
+
+                //confirm incomplete
+                return false;
+            }
+        }
         public static bool changeColorOfAnnotsByColor(string sourcePath, string tempPath, System.Drawing.Color existingColor, System.Drawing.Color newColor)
         {
             PdfDocument pdfDoc = null;
@@ -312,10 +349,7 @@ namespace PdfParser
             string richText = _generateRichText(fontSize, defaultColor, contents.TrimEnd(' '));
 
             //get modification date
-            string time = String.Format("D:{0}'00'", DateTime.Now.ToString("yyyyMMddHHmmsszz", DateTimeFormatInfo.InvariantInfo));
-
-            //get rotation
-            //PdfNumber rotation = annot.GetPdfObject().Get(PdfName.Rotate) as PdfNumber;
+            string time = String.Format("D:{0}'00'", DateTime.Now.ToString("yyyyMMddHHmmsszz", DateTimeFormatInfo.InvariantInfo));;
 
             //modify free text annot
             _modifyTextBox(ref annot, contents, defaultColor, fontSize, richText, time);
@@ -336,11 +370,15 @@ namespace PdfParser
             //get modification date
             string time = String.Format("D:{0}'00'", DateTime.Now.ToString("yyyyMMddHHmmsszz", DateTimeFormatInfo.InvariantInfo));
 
-            //get rotation
-            //PdfNumber rotation = annot.GetPdfObject().Get(PdfName.Rotate) as PdfNumber;
-
             //modify free text annot
-            _modifyTextBox(ref annot, contents, defaultColor, fontSize, richText, time);
+            if (annot.GetPdfObject().Get(PdfName.Subj).ToString().Equals("Textbox"))
+            {
+                _modifyTextBox(ref annot, contents, defaultColor, fontSize, richText, time);
+            }
+            else if (annot.GetPdfObject().Get(PdfName.Subj).ToString().Equals("Typewriter"))
+            {
+                _modifyTypewriter(ref annot, contents, defaultColor, fontSize, richText, time);
+            }
 
         }
         private static void _modifyTextBox(ref PdfAnnotation annotation, string contents, SysColor defaultColor, int fontSize, string richText, string modificationDate)
@@ -373,6 +411,29 @@ namespace PdfParser
             annotMA.SetRichText(new PdfString(richText));
 
         }
+        private static void _modifyTypewriter(ref PdfAnnotation annotation, string contents, SysColor defaultColor, int fontSize, string richText, string modificationDate)
+        {
+            PdfDictionary annotDict = annotation.GetPdfObject();
+            PdfFreeTextAnnotation annotFT = annotation as PdfFreeTextAnnotation;
+            PdfMarkupAnnotation annotMA = annotation as PdfMarkupAnnotation;
+
+            //remove the AP
+            annotDict.Remove(PdfName.AP);
+
+            //set contents
+            annotation.SetContents(contents);
+
+            //*set default Style
+            string contentDS = String.Format("font: Helvetica ,sans - serif {0}.00pt; color:{1}", fontSize, ColorTranslator.ToHtml(defaultColor));
+            annotDict.Put(PdfName.DS, new PdfString(contentDS));
+
+            //*set modification date
+            annotation.SetDate(new PdfString(modificationDate));
+
+            //*set Rich text
+            annotMA.SetRichText(new PdfString(richText));
+
+        }
         private static string _generateRichText(int fontSize, SysColor defaultColor, string content)
         {
 
@@ -383,6 +444,28 @@ namespace PdfParser
             string richText = String.Format(
                 "<?xml version=\"1.0\"?>" +
                 "<body xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\" xfa:APIVersion=\"Acrobat:11.0.0\" xfa:spec=\"2.0.2\">" +
+                "<p dir=\"ltr\">" +
+                "<span style=\"text-align:left;font-size:{0}pt;font-style:normal;font-weight:bold;color:{1};font-family:Helvetica\">{2}" +
+                "</span>" +
+                "</p>" +
+                "</body>", fontSize, textColorHex, content);
+
+            return richText;
+        }
+        private static string _generateRichTextForRevBlock(int fontSize, SysColor defaultColor, string content)
+        {
+
+            //get hex color
+            string textColorHex = String.Format("#{0}{1}{2}", defaultColor.R.ToString("X2"), defaultColor.B.ToString("X2"), defaultColor.G.ToString("X2"));
+
+            //create richtext
+            string richText = String.Format(
+                "<?xml version=\"1.0\"?>" +
+                "<body xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\" xfa:APIVersion=\"Acrobat:11.0.0\" xfa:spec=\"2.0.2\">" +
+                "<p dir=\"ltr\">" +
+                "<span style=\"line - height:4.23pt; text - align:left; font - size:4pt; font - style:normal; font - weight:normal; color:#000000;font-family:Helvetica\">&#x20; &#x0A;" +
+                "</span>" +
+                "</p>" +
                 "<p dir=\"ltr\">" +
                 "<span style=\"text-align:left;font-size:{0}pt;font-style:normal;font-weight:bold;color:{1};font-family:Helvetica\">{2}" +
                 "</span>" +
@@ -425,6 +508,8 @@ namespace PdfParser
                 new PdfArray(new float[] { 3070.6f,780,3279,794 }),
                 new PdfArray(new float[] { 3304, 780, 3332, 794 })};
 
+                PdfArray revBlocRect = new PdfArray(new float[] { 20802.53f, 686.377f, 3341.51f, 707.381f });
+
                 //get date
                 string time = DateTime.Now.ToString("dd/MM/yyyy", DateTimeFormatInfo.InvariantInfo);
 
@@ -435,11 +520,11 @@ namespace PdfParser
                 {
                     if (i == 1)
                     {
-                        page.AddAnnotation(_createNewSimpleTextbox(tbRectangles[i], tbContents[i], SysColor.Red, 10));
+                        page.AddAnnotation(_createNewSimpleTypewriter(tbRectangles[i], tbContents[i], SysColor.Red, 10));
                     }
                     else
                     {
-                        page.AddAnnotation(_createNewSimpleTextbox(tbRectangles[i], tbContents[i], SysColor.Red, 11));
+                        page.AddAnnotation(_createNewSimpleTypewriter(tbRectangles[i], tbContents[i], SysColor.Red, 11));
                     }
                 }
                 pdfDoc.Close();
@@ -456,6 +541,130 @@ namespace PdfParser
                 return false;
             }
 
+        }
+
+        public static bool addRevisionTitleblockNEW(PdfPage page, string revision)
+        {
+            PdfDocument pdfDoc = null;
+
+            try
+            {
+
+                //rectangles for each annot
+                PdfArray revBlocRect = new PdfArray(new float[] { 2802.53f, 686.377f, 3341.51f, 707.381f });
+
+                //get date
+                string time = DateTime.Now.ToString("dd/MM/yyyy", DateTimeFormatInfo.InvariantInfo);
+
+                //contents for each annot
+                string contents = string.Format("{0}     {1}          SN                  DP                D4                         Updated for FCR 000000                          RR", revision, time);
+
+                //add annot
+                page.AddAnnotation(_createRevBlockTextbox(revBlocRect, contents, SysColor.Red, 10));
+
+                pdfDoc.Close();
+
+                //confirm complete
+                return true;
+            }
+            catch
+            {
+                //clean up
+                if (pdfDoc != null) { pdfDoc.Close(); }
+
+                //confirm incomplete
+                return false;
+            }
+
+        }
+        private static PdfAnnotation _createNewTypewriter(PdfArray rectangle, string contents, SysColor defaultColor, string richText, string author, string creationDate, PdfNumber rotation, int fontSize)
+        {
+            PdfAnnotation annotation = new PdfFreeTextAnnotation(new PdfGeom.Rectangle(1, 1, 1, 1), null);
+            PdfFreeTextAnnotation annotFT = annotation as PdfFreeTextAnnotation;
+            PdfMarkupAnnotation annotMA = annotation as PdfMarkupAnnotation;
+            PdfDictionary annotDict = annotation.GetPdfObject();
+
+            //set border effect
+            PdfDictionary BE = new PdfDictionary();
+            PdfDictionary contentsBE = new PdfDictionary();
+            contentsBE.Put(PdfName.S, PdfName.S);
+            BE.Put(PdfName.BE, contentsBE);
+            annotDict.Put(PdfName.BE, BE);
+
+            //set border style
+            PdfDictionary BS = new PdfDictionary();
+            PdfDictionary contentsBS = new PdfDictionary();
+            contentsBS.Put(PdfName.S, PdfName.S);
+            contentsBS.Put(PdfName.W, new PdfNumber(0));
+            BS.Put(PdfName.BS, contentsBS);
+            annotDict.Put(PdfName.BS, BS);
+
+            //set the opacity
+            annotDict.Put(PdfName.CA, new PdfNumber(1));
+
+            //set content
+            annotation.SetContents(contents);
+
+            //set creation date 
+            annotDict.Put(PdfName.CreationDate, new PdfString(creationDate));
+
+            //*set default appearance
+            annotDict.Put(PdfName.DA, new PdfString("   /FXF2 13 Tf"));
+            AnnotationDefaultAppearance DA = new AnnotationDefaultAppearance();
+            DA.SetColor(new DeviceRgb(defaultColor));
+            DA.SetFont(StandardAnnotationFont.Helvetica);
+            DA.SetFontSize(fontSize);
+            annotFT.SetDefaultAppearance(DA);
+
+            //*set default Style
+            string contentDS = String.Format("font: Helvetica ,sans - serif {0}.00pt; color:{1}", fontSize, ColorTranslator.ToHtml(defaultColor));
+            annotDict.Put(PdfName.DS, new PdfString(contentDS));
+
+            //set flag
+            annotation.SetFlag(4);
+
+            //set intent
+            annotMA.SetIntent(PdfName.FreeTextTypeWriter);
+
+            //*set modification date
+            annotation.SetDate(new PdfString(creationDate));
+
+            //set quadding
+            annotDict.Put(PdfName.Q, new PdfNumber(0));
+
+            //*set Rich text
+            annotMA.SetRichText(new PdfString(richText));
+
+            //set rectangle
+            annotation.SetRectangle(rectangle);
+
+            //set Rotation
+            annotDict.Put(PdfName.Rotate, rotation);
+
+            //set subject
+            annotDict.Put(PdfName.Subj, new PdfString("Typewriter"));
+
+            //set subtype
+            annotDict.Put(PdfName.Subtype, PdfName.FreeText);
+
+            //set title
+            annotation.SetTitle(new PdfString(author));
+
+            //set type
+            annotDict.Put(PdfName.Type, PdfName.Annot);
+
+            return annotation;
+        }
+        private static PdfAnnotation _createNewSimpleTypewriter(PdfArray rectangle, string contents, SysColor defaultColor, int fontSize)
+        {
+            // make default values
+            string author = Environment.UserName;
+            string richText = _generateRichText(fontSize, defaultColor, contents);
+            string creationDate = String.Format("D:{0}'00'", DateTime.Now.ToString("yyyyMMddHHmmsszz", DateTimeFormatInfo.InvariantInfo));
+            PdfNumber rotation = new PdfNumber(0);
+
+            //create annot
+            return _createNewTypewriter(rectangle, contents, defaultColor, richText, author, creationDate, rotation, fontSize);
         }
         private static PdfAnnotation _createNewTextbox(PdfArray rectangle, string contents, SysColor defaultColor, string richText, string author, string creationDate, PdfNumber rotation, int fontSize)
         {
@@ -542,6 +751,17 @@ namespace PdfParser
             //create annot
             return _createNewTextbox(rectangle, contents, defaultColor, richText, author, creationDate, rotation, fontSize);
         }
+        private static PdfAnnotation _createRevBlockTextbox(PdfArray rectangle, string contents, SysColor defaultColor, int fontSize)
+        {
+            // make default values
+            string author = Environment.UserName;
+            string richText = _generateRichTextForRevBlock(fontSize, defaultColor, contents);
+            string creationDate = String.Format("D:{0}'00'", DateTime.Now.ToString("yyyyMMddHHmmsszz", DateTimeFormatInfo.InvariantInfo));
+            PdfNumber rotation = new PdfNumber(0);
+
+            //create annot
+            return _createNewTextbox(rectangle, contents, defaultColor, richText, author, creationDate, rotation, fontSize);
+        }
         private static void _loopthroughimages(string sourcePath, string sigPath)
         {
             //get pdf for read and write
@@ -608,6 +828,12 @@ namespace PdfParser
             string output = _increaseRevision(newestRevision);
 
             return output;
+        }
+        public static string getNextRevisionFromDocumentName(string name)
+        {
+            string revNumber = name.Substring(name.LastIndexOf("-") + 1, 4);
+            string newRevNumber = _increaseRevision(revNumber);
+            return newRevNumber;
         }
         private static bool _isNewestRevision(string thisRev, string newestRev)
         {
@@ -682,80 +908,48 @@ namespace PdfParser
             }
             return null;
         }
-        private static void testfromInternet(string sourcePath, string destPath, string tempDestPath)
+        public static void testfromInternet(string destPath, string tempDestPath)
         {
             //get the drawing to copy from (soruce drawing)
-            PdfDocument sourceDoc = _getPdfForRead(sourcePath);
+            //PdfDocument sourceDoc = _getPdfForRead(sourcePath);
 
             //get the new drawing for read and temporary fro write (destination drawing)
             PdfDocument masterPdfDoc = getPdfForReadAndWrite(destPath, tempDestPath);
             PdfPage masterDocPage = masterPdfDoc.GetFirstPage();
 
             //get annotations from source
-            PdfPage sourcePage = sourceDoc.GetFirstPage();
+            PdfPage sourcePage = masterPdfDoc.GetFirstPage();
             IList<PdfAnnotation> annotations = sourcePage.GetAnnotations();
 
-            foreach (var anno in annotations)
+            foreach (var annot in annotations)
             {
-                if(anno.GetSubtype() == PdfName.FreeText)
+                if(annot.GetSubtype() == PdfName.FreeText)
                 {
-                    if (anno.GetContents().ToString().Equals("CJ"))
+                    PdfDictionary annotAppDict = annot.GetAppearanceDictionary();
+                    PdfAnnotationAppearance appearance = new PdfAnnotationAppearance(annotAppDict);
+
+                    foreach (PdfName key in annotAppDict.KeySet())
                     {
-                        //get color 
-                        System.Drawing.Color color = System.Drawing.Color.Red;
-                        string textColor = String.Format("#{0}{1}{2}", color.R.ToString("X2"), color.B.ToString("X2"), color.G.ToString("X2"));
-                        
-                        //get content
-                        string content = "FCR 111111";
+                        PdfStream value = annotAppDict.GetAsStream(key);
+                        PdfDictionary valueDict = annotAppDict.GetAsDictionary(key);
 
-                        //get rectangle
-                        PdfArray oldRect = anno.GetRectangle();
-
-                        //get font size
-                        string contentRT = anno.GetPdfObject().Get(PdfName.RC).ToString();
-                        int fontSizeIndex = contentRT.LastIndexOf("font-size:") + 10;
-                        int fontSize = int.Parse(contentRT.Substring(fontSizeIndex, 2));
-
-                        //create richtext
-                        string richText = String.Format(
-                            "<?xml version=\"1.0\"?>" +
-                            "<body xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\" xfa:APIVersion=\"Acrobat:11.0.0\" xfa:spec=\"2.0.2\">" +
-                            "<p dir=\"ltr\">" +
-                            "<span style=\"text-align:left;font-size:{0}pt;font-style:normal;font-weight:bold;color:{1};font-family:Helvetica\">{2}" +
-                            "</span>" +
-                            "</p>" +
-                            "</body>", fontSize, textColor, content);
-
-                        //get username
-                        string user = Environment.UserName;
-
-                        //get time
-                        string time = String.Format("D:{0}'00'", DateTime.Now.ToString("yyyyMMddHHmmsszz", DateTimeFormatInfo.InvariantInfo));
-
-                        //get rotation
-                        PdfNumber rotation = anno.GetPdfObject().Get(PdfName.Rotate) as PdfNumber;
-
-
-
-                        //create the annotation
-                        PdfAnnotation pdfAnnotation = _createNewTextbox(oldRect, content, color, richText, user, time, rotation, fontSize);
-
-                        //add annotation
-                        masterDocPage.AddAnnotation(pdfAnnotation);
-
-                        //delete old annotation
-                        masterDocPage.RemoveAnnotation(anno);
+                        if (value != null)
+                        {
+                            var text = ExtractAnnotationText(value , masterPdfDoc);
+                            PdfStream xObject = new PdfStream();
+                        }
                     }
                 }
 
             }
 
-            sourceDoc.Close();
+            //sourceDoc.Close();
             masterPdfDoc.Close();
         }
-        private static String ExtractAnnotationText(PdfStream xObject)
+        private static String ExtractAnnotationText(PdfStream xObject, PdfDocument pfdDoc)
         {
             PdfResources resources = new PdfResources(xObject.GetAsDictionary(PdfName.Resources));
+            resources.AddFont(pfdDoc, PdfFontFactory.CreateFont());
             ITextExtractionStrategy strategy = new LocationTextExtractionStrategy();
 
             PdfCanvasProcessor processor = new PdfCanvasProcessor(strategy);
