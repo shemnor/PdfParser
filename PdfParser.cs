@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Text.RegularExpressions;
-using System.Windows.Forms;
 using SysColor = System.Drawing.Color;
 using iText.Kernel.Colors;
 using iText.Kernel.Pdf;
@@ -27,7 +26,7 @@ namespace PdfParser
         }
 
         #region ###### General methods
-        private static PdfDocument getPdfForReadAndWrite(string sourcePath, string destPath)
+        private static PdfDocument _getPdfForReadAndWrite(string sourcePath, string destPath)
         {
             PdfReader reader = new PdfReader(sourcePath);
             PdfWriter writer = new PdfWriter(destPath);
@@ -63,7 +62,7 @@ namespace PdfParser
                 sourceDoc = _getPdfForRead(sourcePath);
 
                 //get the new drawing for read and temporary fro write (destination drawing)
-                destDoc = getPdfForReadAndWrite(destPath, tempDestPath);
+                destDoc = _getPdfForReadAndWrite(destPath, tempDestPath);
 
                 //get annotations from source
                 PdfPage sourcePage = sourceDoc.GetFirstPage();
@@ -190,13 +189,13 @@ namespace PdfParser
         #endregion
 
         #region ####### update content
-        public static bool updateDrawingWithFcrAndRevision (string sourcePath, string tempPath, string fcrNumber, string revision)
+        public static bool updateDrawingTextboxByRegex (string sourcePath, string tempPath, string newContent)
         {
             PdfDocument pdfDoc = null;
             try
             {
                 //get pdf for read and write
-                pdfDoc = getPdfForReadAndWrite(sourcePath, tempPath);
+                pdfDoc = _getPdfForReadAndWrite(sourcePath, tempPath);
 
                 //get page
                 PdfPage page = pdfDoc.GetFirstPage();
@@ -204,13 +203,8 @@ namespace PdfParser
                 //get annotation on page
                 IList<PdfAnnotation> annotations = page.GetAnnotations();
 
-                //update revision boxes
-                string revRegexPattern = RegexPattern.revision;
-                _updateTextboxContentWithRegex(ref annotations, revision, revRegexPattern);
-
-                //update FCR texboxes
-                string fcrRegexPattern = RegexPattern.fcr;
-                _updateTextboxContentWithRegex(ref annotations, fcrNumber, fcrRegexPattern);
+                if (Regex.IsMatch(newContent, RegexPattern.revision)) { _updateTextboxContentWithRegex(ref annotations, newContent, RegexPattern.revision ); }
+                else if(Regex.IsMatch(newContent,RegexPattern.fcr)) { _updateTextboxContentWithRegex(ref annotations, newContent, RegexPattern.fcr); }
 
                 //close document
                 pdfDoc.Close();
@@ -227,50 +221,13 @@ namespace PdfParser
                 return false;
             }
         }
-        public static bool updateDrawingWithRevisionAndTitleBlock(string sourcePath, string tempPath, string revision)
+        public static bool changeColorOfAnnotsByColor(string sourcePath, string tempPath, SysColor existingColor, SysColor newColor)
         {
             PdfDocument pdfDoc = null;
             try
             {
                 //get pdf for read and write
-                pdfDoc = getPdfForReadAndWrite(sourcePath, tempPath);
-
-                //get page
-                PdfPage page = pdfDoc.GetFirstPage();
-
-                //get annotation on page
-                IList<PdfAnnotation> annotations = page.GetAnnotations();
-
-                //update revision boxes
-                string revRegexPattern = RegexPattern.revision;
-                _updateTextboxContentWithRegex(ref annotations, revision, revRegexPattern);
-
-                //addRevisionBlock
-                addRevisionTitleblockNEW(page, revision);
-
-                //close document
-                pdfDoc.Close();
-
-                //confirm complete
-                return true;
-            }
-            catch
-            {
-                //clean up
-                if (pdfDoc != null) { pdfDoc.Close(); }
-
-                //confirm incomplete
-                return false;
-            }
-        }
-        public static bool changeColorOfAnnotsByColor(string sourcePath, string tempPath, System.Drawing.Color existingColor, System.Drawing.Color newColor)
-        {
-            PdfDocument pdfDoc = null;
-
-            try
-            {
-                //get pdf for read and write
-                pdfDoc = getPdfForReadAndWrite(sourcePath, tempPath);
+                pdfDoc = _getPdfForReadAndWrite(sourcePath, tempPath);
 
                 //get page
                 PdfPage page = pdfDoc.GetFirstPage();
@@ -295,8 +252,6 @@ namespace PdfParser
                 //confirm incomplete
                 return false;
             }
-
-
         }
         private static void _updateAnnotsWithColor(ref IList<PdfAnnotation> annotations, SysColor existingColor, SysColor newColor)
         {
@@ -463,7 +418,7 @@ namespace PdfParser
                 "<?xml version=\"1.0\"?>" +
                 "<body xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\" xfa:APIVersion=\"Acrobat:11.0.0\" xfa:spec=\"2.0.2\">" +
                 "<p dir=\"ltr\">" +
-                "<span style=\"line - height:4.23pt; text - align:left; font - size:4pt; font - style:normal; font - weight:normal; color:#000000;font-family:Helvetica\">&#x20; &#x0A;" +
+                "<span style=\"line - height:4.23pt; text - align:left; font - size:6pt; font - style:normal; font - weight:normal; color:#000000;font-family:Helvetica\">&#x20; &#x0A;" +
                 "</span>" +
                 "</p>" +
                 "<p dir=\"ltr\">" +
@@ -486,14 +441,14 @@ namespace PdfParser
         #endregion
 
         #region create new content
-        public static bool addRevisionTitleblock(string sourcePath, string destPath, string revision, string author)
+        private static bool addRevisionTitleblockOLD(string sourcePath, string destPath, string revision, string author)
         {
             PdfDocument pdfDoc = null;
 
             try
             {
                 //get pdf for read and write
-                pdfDoc = getPdfForReadAndWrite(sourcePath, destPath);
+                pdfDoc = _getPdfForReadAndWrite(sourcePath, destPath);
 
                 //get page
                 PdfPage page = pdfDoc.GetFirstPage();
@@ -507,6 +462,7 @@ namespace PdfParser
                 new PdfArray(new float[] { 3028.6f,780,3055,794 }),
                 new PdfArray(new float[] { 3070.6f,780,3279,794 }),
                 new PdfArray(new float[] { 3304, 780, 3332, 794 })};
+                
 
                 PdfArray revBlocRect = new PdfArray(new float[] { 20802.53f, 686.377f, 3341.51f, 707.381f });
 
@@ -542,26 +498,32 @@ namespace PdfParser
             }
 
         }
-
-        public static bool addRevisionTitleblockNEW(PdfPage page, string revision)
+        public static bool addRevisionTitleblock(string sourcePath, string destPath, string revision, string author, string checker)
         {
             PdfDocument pdfDoc = null;
-
             try
             {
+                //get pdf for read and write
+                pdfDoc = _getPdfForReadAndWrite(sourcePath, destPath);
 
-                //rectangles for each annot
-                PdfArray revBlocRect = new PdfArray(new float[] { 2802.53f, 686.377f, 3341.51f, 707.381f });
+                //get page
+                PdfPage page = pdfDoc.GetFirstPage();
+
+                //rectangles for titleblock annot
+                float height = 22.65f;
+                float freeY = _getNextFreeSpaceInRevBlock(page, height);
+                PdfArray revBlocRect = new PdfArray(new float[] { 2802.53f, freeY, 3341.51f, freeY+height });
 
                 //get date
                 string time = DateTime.Now.ToString("dd/MM/yyyy", DateTimeFormatInfo.InvariantInfo);
 
                 //contents for each annot
-                string contents = string.Format("{0}     {1}          SN                  DP                D4                         Updated for FCR 000000                          RR", revision, time);
+                string contents = string.Format("{0}     {1}          {2}                  {3}                D4                         Updated for FCR 000000                          RR", revision, time,author,checker);
 
                 //add annot
                 page.AddAnnotation(_createRevBlockTextbox(revBlocRect, contents, SysColor.Red, 10));
 
+                //close documents
                 pdfDoc.Close();
 
                 //confirm complete
@@ -782,15 +744,15 @@ namespace PdfParser
                     PdfDictionary pd = (PdfDictionary)obj;
                     if (pd.ContainsKey(PdfName.Subtype) && pd.Get(PdfName.Subtype).ToString() == "/Image")
                     {
-                        string test = "";
+                        //string test = "";
                     }
                 }
             }
         }
         #endregion
 
-        #region analyse content
-        public static string getNextRevisionFromDocument(string sourcePath)
+        #region analise content
+        public static string getNextRevisionFromAnnotations(string sourcePath)
         {
             //get pdf for read and write
             PdfDocument pdfDoc = _getPdfForRead(sourcePath);
@@ -835,6 +797,127 @@ namespace PdfParser
             string newRevNumber = _increaseRevision(revNumber);
             return newRevNumber;
         }
+        public static string getTextInRectangle(string sourcePath, float[] rectangle)
+        {
+            PdfDocument pdfDoc = null;
+            try
+            {
+                //get pdf for read and write
+                pdfDoc = _getPdfForRead(sourcePath);
+
+                //get page
+                PdfPage page = pdfDoc.GetFirstPage();
+
+                //extract string
+                PdfGeom.Rectangle rect = new PdfGeom.Rectangle(rectangle[0], rectangle[1], rectangle[2], rectangle[3]);
+                TextRegionEventFilter regionFilter = new TextRegionEventFilter(rect);
+                ITextExtractionStrategy strategy = new FilteredTextEventListener(new LocationTextExtractionStrategy(), regionFilter);
+                String str = PdfTextExtractor.GetTextFromPage(page, strategy);
+
+                //close document
+                pdfDoc.Close();
+
+                //confirm complete
+                return str;
+            }
+            catch
+            {
+                //clean up
+                if (pdfDoc != null) { pdfDoc.Close(); }
+
+                //confirm incomplete
+                return "";
+            }
+        }
+        private static string getTextInRectangle(PdfPage page, PdfGeom.Rectangle rectangle)
+        {
+            try
+            {
+                //extract string
+                //PdfGeom.Rectangle rect = new PdfGeom.Rectangle(rectangle[0], rectangle[1], rectangle[2], rectangle[3]);
+                TextRegionEventFilter regionFilter = new TextRegionEventFilter(rectangle);
+                ITextExtractionStrategy strategy = new FilteredTextEventListener(new LocationTextExtractionStrategy(), regionFilter);
+                String str = PdfTextExtractor.GetTextFromPage(page, strategy);
+
+                //confirm complete
+                return str;
+            }
+            catch
+            {
+                //confirm incomplete
+                return "";
+            }
+        }
+        private static float _getNextFreeSpaceInRevBlock(PdfPage page, float height)
+        {
+            int rowCount = 8;
+            float rowHeight = height;
+            float minX = 2800f;
+            float maxX = 3350f;
+            float minY = 640.7f;
+            float maxY = minY + (rowCount * rowHeight)+rowHeight;
+            float freeY = minY;
+
+            string extractedText = "";
+
+            PdfGeom.Rectangle revBlock = new PdfGeom.Rectangle(minX, minY, maxX, maxY);
+
+            try
+            {
+                //check for text
+                for (int i = 0; i < rowCount; i++)
+                {
+                    //float[] rectnagle = new float[] { minX, minY + (rowHeight * i), maxX, minY + (rowHeight * (i + 1)) };
+                    PdfGeom.Rectangle rectangle = new PdfGeom.Rectangle(minX, minY + (rowHeight * i), maxX - minX, rowHeight);
+                    extractedText = getTextInRectangle(page, rectangle);
+                    if (extractedText != "")
+                    {
+                        freeY = minY+(rowHeight*(i+1));
+                        extractedText = "";
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                //check for annots
+                IList<PdfAnnotation> annotations = page.GetAnnotations();
+                for (int i = 0; i < annotations.Count; i++)
+                {
+                    if (annotations[i].GetSubtype() == PdfName.FreeText)
+                    {
+                        //get content
+                        PdfAnnotation annot = annotations[i] as PdfAnnotation;
+                        PdfGeom.Rectangle annotRect = annot.GetRectangle().ToRectangle();
+                        
+                        //if its inside the revblock and higher than text
+                        if (revBlock.Contains(annotRect) && annotRect.GetY()>freeY)
+                        {
+                            //get current row number based on freeY value
+                            int rowNum = System.Convert.ToInt32((freeY - minY) / rowHeight);
+                            //check in which row the annot is in
+                            for (int j = rowNum; j < rowCount; j++)
+                            {
+                                PdfGeom.Rectangle rowrectanlge = new PdfGeom.Rectangle(minX, minY + (rowHeight * j), maxX - minX, rowHeight);
+                                if (rowrectanlge.Contains(annotRect))
+                                {
+                                    freeY = minY + (rowHeight * (j + 1));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                //confirm complete
+                return freeY;
+            }
+            catch
+            {
+                //confirm incomplete
+                return maxY-rowHeight;
+            }
+        }
         private static bool _isNewestRevision(string thisRev, string newestRev)
         {
             int[] thisRevArr = new int[2];
@@ -872,8 +955,6 @@ namespace PdfParser
         #endregion
 
         #region ################################################## WORK IN PROGRESS
-
-
         private static string pdfText(string path)
         {
             PdfReader reader = new PdfReader(path);
@@ -886,35 +967,13 @@ namespace PdfParser
             reader.Close();
             return text;
         }
-        private static string pdfTextByRect(string path)
-        {
-            PdfReader reader = new PdfReader(path);
-            PdfDocument pdfDoc = new PdfDocument(reader);
-            iText.Kernel.Geom.Rectangle rect = new iText.Kernel.Geom.Rectangle(2871,326,440,90);
-            TextRegionEventFilter regionFilter = new TextRegionEventFilter(rect);
-            for (int page = 1; page <= pdfDoc.GetNumberOfPages(); page++)
-            {
-                ITextExtractionStrategy strategy = new FilteredTextEventListener(new LocationTextExtractionStrategy(), regionFilter);
-                try
-                {
-                    String str = PdfTextExtractor.GetTextFromPage(pdfDoc.GetPage(page), strategy) + "\n";
-                    return str;
-                    //fos.write(str.GetBytes("UTF-8"));
-                }
-                catch (Exception e)
-                {
-                    return null;
-                }
-            }
-            return null;
-        }
         public static void testfromInternet(string destPath, string tempDestPath)
         {
             //get the drawing to copy from (soruce drawing)
             //PdfDocument sourceDoc = _getPdfForRead(sourcePath);
 
             //get the new drawing for read and temporary fro write (destination drawing)
-            PdfDocument masterPdfDoc = getPdfForReadAndWrite(destPath, tempDestPath);
+            PdfDocument masterPdfDoc = _getPdfForReadAndWrite(destPath, tempDestPath);
             PdfPage masterDocPage = masterPdfDoc.GetFirstPage();
 
             //get annotations from source
