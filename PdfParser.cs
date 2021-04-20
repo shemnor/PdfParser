@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.Windows;
+using System.Numerics;
 using System.Text.RegularExpressions;
 using SysColor = System.Drawing.Color;
 using iText.Kernel.Colors;
@@ -75,7 +77,7 @@ namespace PdfParser
             }
         }
 
-        private static class RevCellStandard
+        private static class RevCellStandardOLD
         {
             public static int rowCount { get { return 8; } }
             //rev box
@@ -94,7 +96,7 @@ namespace PdfParser
             public static float apprCellX { get { return 3280f; } }
             public static float apprCellWidth { get { return 61.74f; } }
         }
-        private static class RevCellSmall
+        private static class RevCellSmallOLD
         {
             public static int rowCount { get { return 8; } }
             //rev box
@@ -114,6 +116,41 @@ namespace PdfParser
             public static float apprCellWidth { get { return 61.2f; } }
 
         }
+
+        //Data for locations and sizes of revision block and new annotations
+        //normal when margins are set correctly by drawing originator
+        RevCellDims revDimsNormal = new RevCellDims(
+        rowCount: 8,
+        revBoxX: 2803.63f,
+        revBoxWidth: 538.22f,
+        revBoxY: 640.76f,
+        rowHeight: 22.5f,
+        rowSpacing: 0.271f,
+        cellMargin: 2.5f,
+        authCellX: 2891.6f,
+        authCellWidth: 61.9f,
+        chckCellX: 2953.87f,
+        chckCellWidth: 61.9f,
+        apprCellX: 3280f,
+        apprCellWidth: 61.74f
+        );
+
+        //smaller when margins are set bigger than normal by drawing originator
+        RevCellDims revDimsSmall = new RevCellDims(
+        rowCount: 8,
+        revBoxX: 2790.07f,
+        revBoxWidth: 531.79f,
+        revBoxY: 647.393f,
+        rowHeight: 22.25f,
+        rowSpacing: 0.25f,
+        cellMargin: 2.5f,
+        authCellX: 2876.92f,
+        authCellWidth: 61.2f,
+        chckCellX: 2938.56f,
+        chckCellWidth: 61.13f,
+        apprCellX: 3260.56f,
+        apprCellWidth: 61.2f
+        );
 
         #region ###### General methods
         private static PdfDocument _getPdfForReadAndWrite(string sourcePath, string destPath)
@@ -141,7 +178,7 @@ namespace PdfParser
         #endregion
 
         #region ###### copy content
-        public static bool copyAnnotsByColor(string sourcePath, string destPath, string tempDestPath)
+        public static bool copyAnnotsByColorRed(string sourcePath, string destPath, string tempDestPath)
         {
             PdfDocument sourceDoc = null;
             PdfDocument destDoc = null;
@@ -160,7 +197,7 @@ namespace PdfParser
 
                 //filter annotations by color
                 SysColor filterColor = SysColor.Red;
-                _filterAnnotationsByColor(ref annotations, filterColor);
+                //_filterAnnotationsByColor(ref annotations, filterColor);
 
                 //add annotations in destination drawing
                 PdfPage destPage = destDoc.GetFirstPage();
@@ -659,7 +696,7 @@ namespace PdfParser
             }
 
         }
-        public static bool addRevisionTitleblock(string sourcePath, string destPath, string revision, string author, string checker, string reason, string authSigPath = "", string checkerSigPath = "", string approverSigPath = "")
+        public static bool addRevisionTitleblockOLD2(string sourcePath, string destPath, string revision, string author, string checker, string reason, string authSigPath = "", string checkerSigPath = "", string approverSigPath = "")
         {
 
             //Data for locations and sizes of revision block and new annotations
@@ -714,6 +751,81 @@ namespace PdfParser
                 RevCellDims revBlockDims = null;
                 if (pageMarginsAreNormal) { revBlockDims = RevCellNormal; }
                 else { revBlockDims = RevCellSmaller; }
+
+                //get free space in revtitleblock depeding on margins
+                float freeY = _getNextFreeSpaceInRevBlock(page, revBlockDims);
+
+                //add rev titleblock
+                //get rectangle
+                PdfArray revBlocRect = new PdfArray(new float[] { revBlockDims.revBoxX, freeY, revBlockDims.revBoxX + revBlockDims.revBoxWidth, freeY + revBlockDims.rowHeight });
+                //get date
+                string time = DateTime.Now.ToString("dd/MM/yy", DateTimeFormatInfo.InvariantInfo);
+                //contents for each annot
+                string contents = string.Format("{0}   {1}         {2}               {3}             D4              {4}                    RR", revision, time, author, checker, reason);
+                //add annot
+                page.AddAnnotation(_createRevBlockTextbox(revBlocRect, contents, SysColor.Red, 12));
+
+                //add sigs
+                if (authSigPath != "")
+                {
+                    float cellX = revBlockDims.authCellX;
+                    float width = revBlockDims.authCellWidth;
+                    float margin = revBlockDims.cellMargin;
+                    float height = revBlockDims.rowHeight;
+
+                    PdfGeom.Rectangle authSigRect = new PdfGeom.Rectangle(cellX + margin, freeY + height + margin, width - (2 * margin), freeY + (height * 2) - (2 * margin));
+                    addSignaturesToRevision(pdfDoc, authSigRect, authSigPath);
+                }
+                if (checkerSigPath != "")
+                {
+                    float cellX = revBlockDims.chckCellX;
+                    float width = revBlockDims.chckCellWidth;
+                    float margin = revBlockDims.cellMargin;
+                    float height = revBlockDims.rowHeight;
+
+                    PdfGeom.Rectangle checkerSigRect = new PdfGeom.Rectangle(cellX + margin, freeY + height + margin, width - (2 * margin), freeY + (height * 2) - (2 * margin));
+                    addSignaturesToRevision(pdfDoc, checkerSigRect, checkerSigPath);
+                }
+                if (approverSigPath != "")
+                {
+                    float cellX = revBlockDims.apprCellX;
+                    float width = revBlockDims.apprCellWidth;
+                    float margin = revBlockDims.cellMargin;
+                    float height = revBlockDims.rowHeight;
+
+                    PdfGeom.Rectangle approverSigRect = new PdfGeom.Rectangle(cellX + margin, freeY + height + margin, width - (2 * margin), freeY + (height * 2) - (2 * margin));
+                    addSignaturesToRevision(pdfDoc, approverSigRect, approverSigPath);
+                }
+
+                //close documents
+                pdfDoc.Close();
+
+                //confirm complete
+                return true;
+            }
+            catch
+            {
+                //clean up
+                if (pdfDoc != null) { pdfDoc.Close(); }
+
+                //confirm incomplete
+                return false;
+            }
+
+        }
+        public bool addRevisionTitleblock(string sourcePath, string destPath, string revision, string author, string checker, string reason, string authSigPath = "", string checkerSigPath = "", string approverSigPath = "")
+        {
+            PdfDocument pdfDoc = null;
+            try
+            {
+                //get pdf for read and write
+                pdfDoc = _getPdfForReadAndWrite(sourcePath, destPath);
+
+                //get page
+                PdfPage page = pdfDoc.GetFirstPage();
+
+                //select correct revision block positions and dimensions
+                RevCellDims revBlockDims = _getRevisionBlockDimensions(page);
 
                 //get free space in revtitleblock depeding on margins
                 float freeY = _getNextFreeSpaceInRevBlock(page, revBlockDims);
@@ -1013,7 +1125,7 @@ namespace PdfParser
         #endregion
 
         #region analyse content
-        public static string getNextRevisionFromAnnotations(string sourcePath)
+        public string getCurrentRevisionFromDocument(string sourcePath)
         {
             //get pdf for read and write
             PdfDocument pdfDoc = _getPdfForRead(sourcePath);
@@ -1021,38 +1133,27 @@ namespace PdfParser
             //get page
             PdfPage page = pdfDoc.GetFirstPage();
 
+            //get newest revision
+            string newestRevision = "A";
+
+            //check if margins are normal
+            RevCellDims revBlockDims = _getRevisionBlockDimensions(page);
+
+            //check text in the revision block
+            newestRevision = _getCurrentRevisionFromRevisionBlock(page, revBlockDims, newestRevision);
+
             //get annotation on page
             IList<PdfAnnotation> annots = page.GetAnnotations();
 
-            //get newest revision
-            string newestRevision = "A.00";
+            //check rev annotations in drawing
+            newestRevision = _getCurrentRevisionFromAnnots(annots, newestRevision);
 
-            for (int i = 0; i < annots.Count; i++)
-            {
-                if (annots[i].GetSubtype() == PdfName.FreeText)
-                {
-                    //get content
-                    PdfAnnotation annot = annots[i] as PdfAnnotation;
-                    string contents = annot.GetContents().ToString().TrimEnd(' ');
-
-                    if (Regex.IsMatch(contents, RegexPattern.annotRev))
-                    {
-                        if (_isNewestRevision(contents, newestRevision))
-                        {
-                            newestRevision = contents;
-                        }
-                    }
-                }
-            }
-
+            //close docs
             pdfDoc.Close();
 
-            //+1 the current revision
-            string output = _increaseRevision(newestRevision);
-
-            return output;
+            return newestRevision;
         }
-        public static string getNextRevisionFromDocumentName(string name)
+        public static string getNextRevisionFromNameOLD(string name)
         {
             //get last portion of the name
             string lastNamePortion = name.Substring(name.LastIndexOf("-") + 1);
@@ -1062,7 +1163,8 @@ namespace PdfParser
 
             if (hasNumericalRev)
             {
-                string newRevNumber = _increaseRevision(lastNamePortion);
+                string rev = Regex.Match(name, RegexPattern.nnbFullRev).Value;
+                string newRevNumber = _increaseNumericalRevision(rev);
                 return newRevNumber;
             }
             else if(hasLetterRev)
@@ -1074,24 +1176,13 @@ namespace PdfParser
             //else return nothing
             return "";
         }
-        public static string getNextRevisionFromString(string currentRevision)
+        public static string getNextNumericalRev(string currentRevision)
         {
-            bool hasNumericalRev = Regex.IsMatch(currentRevision, RegexPattern.nnbFullRev);
-            bool hasLetterRev = Regex.IsMatch(currentRevision, RegexPattern.nnbLetterRev);
-
-            if (hasNumericalRev)
-            {
-                string newRevNumber = _increaseRevision(currentRevision);
-                return newRevNumber;
-            }
-            else if (hasLetterRev)
-            {
-                string newRevNumber = currentRevision + ".01";
-                return newRevNumber;
-            }
-
-            //else return nothing
-            return "";
+            return _increaseNumericalRevision(currentRevision);
+        }
+        public static string getNextLetterRev(string currentRevision)
+        {
+            return _increaseLetterRevision(currentRevision);
         }
         public static string getTextInRectangle(string sourcePath, float[] rectangle)
         {
@@ -1150,7 +1241,85 @@ namespace PdfParser
                 }
             }
         }
-        private static string getTextInRectangle(PdfPage page, PdfGeom.Rectangle rectangle)
+        private static bool _checkIfPageMarginsAreNormal(PdfPage page)
+        {
+            float X = 5.5f;
+            float Y = 15;
+            float W = 10f;
+            float H = 75f;
+            string extractedText = "";
+
+            PdfGeom.Rectangle rectangle = new PdfGeom.Rectangle(X, Y, W, H);
+            extractedText = _getTextInRectangle(page, rectangle);
+            if (extractedText == "")
+            {
+                return false;
+            }
+            else
+            {
+                return true;
+            }
+        }
+        private static string _getCurrentRevisionFromAnnots(IList<PdfAnnotation> annots, string baseRevision)
+        {
+            string newestRevision = baseRevision;
+
+            for (int i = 0; i < annots.Count; i++)
+            {
+                if (annots[i].GetSubtype() == PdfName.FreeText)
+                {
+                    //get content
+                    PdfAnnotation annot = annots[i] as PdfAnnotation;
+                    string contents = annot.GetContents().ToString().TrimEnd(' ');
+
+                    if (Regex.IsMatch(contents, RegexPattern.annotRev))
+                    {
+                        if (_isNewestRevision(contents, newestRevision))
+                        {
+                            newestRevision = contents;
+                        }
+                    }
+                }
+            }
+
+            return newestRevision;
+        }
+        private static string _getCurrentRevisionFromRevisionBlock(PdfPage page, RevCellDims dims, string baseRevision)
+        {
+            int rowCount = dims.rowCount;
+            float rowHeight = dims.rowHeight;
+            float minX = dims.revBoxX;
+            float maxX = dims.revBoxX + dims.revBoxWidth;
+            float minY = dims.revBoxY;
+            float maxY = minY + (rowCount * rowHeight) + rowHeight;
+            float freeY = minY;
+
+            string extractedText = "";
+
+            //get newest revision
+            string newestRevision = baseRevision;
+
+            try
+            {
+                //check for text
+                for (int i = 0; i < rowCount; i++)
+                {
+                    PdfGeom.Rectangle rectangle = new PdfGeom.Rectangle(minX, minY + (rowHeight * i), maxX - minX, rowHeight);
+                    extractedText = _getTextInRectangle(page, rectangle);
+                    //if extracted text matches pattern, extract the revision 
+                    //check if extracted revision is latest and save
+                }
+
+                //complete
+                return newestRevision;
+            }
+            catch
+            {
+                //incomplete
+                return newestRevision;
+            }
+        }
+        private static string _getTextInRectangle(PdfPage page, PdfGeom.Rectangle rectangle)
         {
             try
             {
@@ -1192,7 +1361,7 @@ namespace PdfParser
                 {
                     //float[] rectnagle = new float[] { minX, minY + (rowHeight * i), maxX, minY + (rowHeight * (i + 1)) };
                     PdfGeom.Rectangle rectangle = new PdfGeom.Rectangle(minX, minY + (rowHeight * i), maxX - minX, rowHeight);
-                    extractedText = getTextInRectangle(page, rectangle);
+                    extractedText = _getTextInRectangle(page, rectangle);
                     if (extractedText != "")
                     {
                         freeY = minY + (rowHeight * (i + 1)) + (dimensions.rowSpacing * i);
@@ -1242,69 +1411,133 @@ namespace PdfParser
                 return maxY-rowHeight;
             }
         }
-        private static bool _checkIfPageMarginsAreNormal(PdfPage page)
+        private RevCellDims _getRevisionBlockDimensions(PdfPage page)
         {
+            RevCellDims revBlockDims;
+
             float X = 5.5f;
             float Y = 15;
             float W = 10f;
             float H = 75f;
             string extractedText = "";
 
-            PdfGeom.Rectangle rectangle = new PdfGeom.Rectangle(X, Y,W,H);
-            extractedText = getTextInRectangle(page, rectangle);
+            PdfGeom.Rectangle rectangle = new PdfGeom.Rectangle(X, Y, W, H);
+            extractedText = _getTextInRectangle(page, rectangle);
             if (extractedText == "")
             {
-                return false;
+                return revDimsSmall;
             }
             else
             {
-                return true;
+                return revDimsNormal;
             }
         }
-        private static bool _isNewestRevision(string thisRev, string newestRev)
+        private static bool _isNewestRevision(string revToCheck, string baseRev)
         {
 
-            //0 position denotes revision letter. Parse char into number for comparison
-            //1 position denotes numerical revision using last two characters. (assuming revision is always two digits 01-09, 10, 11..)
-            int[] thisRevArr = new int[2];
-            thisRevArr[0] = char.ToUpper(thisRev[0]) - 64;
-            thisRevArr[1] = int.Parse(thisRev.Substring(thisRev.LastIndexOf('.')+1, 2));
+            //accepts single letter ("A") and numerical ("A.01") formats
 
-            int[] newestRevArr = new int[2];
-            newestRevArr[0] = char.ToUpper(newestRev[0]) - 64;
-            newestRevArr[1] = int.Parse(newestRev.Substring(newestRev.LastIndexOf('.')+1, 2));
+            //THIS REVISION
+            int[] revToCheckArr = _translateRevisionTextToInt(revToCheck);
 
+            // NEWEST REVISION
+            int[] baseRevArr = _translateRevisionTextToInt(baseRev);
+
+
+            //compare LETTERS
             //if letter is higher, then must be newer.
-            if (thisRevArr[0] > newestRevArr[0])
+            if (revToCheckArr[0] > baseRevArr[0])
             {
                 return true;
             }
-            // if letter is the same, compare numbers
-            else if (thisRevArr[0].Equals(newestRevArr[0]))
+
+            //comapre NUMBERS
+            //if newer has numerical but base doesnt
+            if(revToCheckArr.Length > baseRevArr.Length)
+            {
+                return true;
+            }
+
+            //(both have numbers) and letter is the same
+            if((baseRevArr.Length == revToCheckArr.Length && baseRev.Length > 1) && revToCheckArr[0].Equals(baseRevArr[0]))
             {
                 //if numbers are higher it must be newer
-                if (thisRevArr[1] > newestRevArr[1])
+                if (revToCheckArr[1] > baseRevArr[1])
                 {
                     return true;
                 }
             }
+
             //otherwise, ignore as its either lower or the same
             return false;
         }
-        private static string _increaseRevision (string newestRev)
+        private static string _increaseNumericalRevision (string thisRev)
         {
-            //0 position denotes revision letter. Parse char into number for comparison
-            //1 position denotes numerical revision using last two characters. (assuming revision is always two digits 01-09, 10, 11..)
-            int[] newestRevArr = new int[2];
-            newestRevArr[0] = char.ToUpper(newestRev[0]) - 64;
-            newestRevArr[1] = int.Parse(newestRev.Substring(newestRev.LastIndexOf('.')+1, 2));
+            //if its just a letter then add 00 numericals
+            if(thisRev.Length == 1)
+            {
+                thisRev = thisRev + ".00";
+            }
 
-            //keep letter the same
-            string letter = ((char)(newestRevArr[0] + 64)).ToString();
-            //increase numerical by one
-            string output = String.Format("{0}.{1,2:D2}", letter, newestRevArr[1]+1);
+            //THIS REVISION
+            int[] thisRevArr = _translateRevisionTextToInt(thisRev);
+
+            //increase numerical revision by one
+            thisRevArr[1] = thisRevArr[1] + 1;
             
-            return output;
+            return _translateRevIntToText(thisRevArr);
+        }
+        private static string _increaseLetterRevision(string thisRev)
+        {
+            //THIS REVISION
+            int[] thisRevArr = _translateRevisionTextToInt(thisRev);
+
+            //increase letter revision by one
+            thisRevArr[0] = thisRevArr[0] + 1;
+
+            return _translateRevIntToText(thisRevArr);
+        }
+        private static int[] _translateRevisionTextToInt(string revString)
+        {
+            //accepts single letter ("A") and numerical ("A.01") formats
+
+            //0 position denotes revision letter. Parse char into number for numerical comparison
+            //optional - 1 position denotes numerical revision using last two characters. (assuming numerical revision is always two digits 01-09, 10, 11..)
+
+            // is length includes numerical then include in translation
+            if (revString.Length >= 4)
+            {
+                int[] revArr = new int[2];
+                revArr[0] = char.ToUpper(revString[0]) - 64;
+                revArr[1] = int.Parse(revString.Substring(revString.LastIndexOf('.') + 1, 2));
+                return revArr;
+            }
+            else
+            {
+                int[] revArr = new int[1];
+                revArr[0] = char.ToUpper(revString[0]) - 64;
+                return revArr;
+            }
+        }
+        private static string _translateRevIntToText(int[] thisRevArr)
+        {
+            if(thisRevArr.Length == 1)
+            {
+                //translate letter
+                string letter = ((char)(thisRevArr[0] + 64)).ToString();
+
+                return letter;
+            }
+            else
+            {
+                //translate letter
+                string letter = ((char)(thisRevArr[0] + 64)).ToString();
+                //translate number
+                int number = thisRevArr[1];
+
+                //create string 
+                return String.Format("{0}.{1:D2}", letter, number);
+            }
         }
 
         #endregion
@@ -1394,6 +1627,37 @@ namespace PdfParser
             IList<PdfAnnotation> annotations = page.GetAnnotations();
             return annotations.Count;
         }
+
+        private static void test()
+        {
+            double[] values = new double[2] { 0.5, 0.5 };
+            float[] fValues = new float[2] { 0.5f, 0.5f };
+            float[] fValues2 = new float[2] { 1f, 1f };
+
+            Vector<float> newV = new Vector<float>(fValues);
+            Vector<float> newV2 = new Vector<float>(fValues2);
+
+            Vector<float> addedV = Vector.Subtract<float>(newV, newV2);
+        }
+
+        public static void regexExtractionStratTest(string path)
+        {
+            PdfReader reader = new PdfReader(path);
+            PdfDocument pdfDoc = new PdfDocument(reader);
+            Document doc = new Document(pdfDoc);
+            PdfPage page = pdfDoc.GetPage(1);
+
+
+            string pattern = "UK PROTECT";
+
+            RegexBasedLocationExtractionStrategy strategy = new RegexBasedLocationExtractionStrategy(pattern);
+            PdfCanvasProcessor parser = new PdfCanvasProcessor(strategy);
+            parser.ProcessPageContent(page);
+            //parser.ProcessPageContent(page);
+            ICollection<IPdfTextLocation> locations = strategy.GetResultantLocations();
+            IList<IPdfTextLocation> list = (IList<IPdfTextLocation>)locations;
+        }
+
         #endregion
     }
 }
